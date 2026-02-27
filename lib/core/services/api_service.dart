@@ -112,9 +112,15 @@ class ApiService {
     required String endpoint,
     String? baseUrl,
     Map<String, String>? headers,
+    Map<String, String>? queryParams,
   }) async {
     try {
-      final url = Uri.parse('${baseUrl ?? ApiConstants.baseUrl}$endpoint');
+      var urlString = '${baseUrl ?? ApiConstants.baseUrl}$endpoint';
+      if (queryParams != null && queryParams.isNotEmpty) {
+        final query = queryParams.entries.map((e) => '${e.key}=${Uri.encodeComponent(e.value)}').join('&');
+        urlString = '$urlString?$query';
+      }
+      final url = Uri.parse(urlString);
       
       final defaultHeaders = {
         'Content-Type': 'application/json',
@@ -146,6 +152,49 @@ class ApiService {
       );
     }
   }
+  /// Realiza una petición PUT al API
+  Future<Map<String, dynamic>> put({
+    required String endpoint,
+    required Map<String, dynamic> body,
+    String? baseUrl,
+    Map<String, String>? headers,
+  }) async {
+    try {
+      final url = Uri.parse('${baseUrl ?? ApiConstants.baseUrl}$endpoint');
+      
+      final defaultHeaders = <String, String>{
+        'Content-Type': 'application/json',
+        'Accept': 'application/json',
+      };
+      
+      if (headers != null) {
+        defaultHeaders.addAll(headers);
+      }
+      
+      final response = await _client.put(
+        url,
+        headers: defaultHeaders,
+        body: jsonEncode(body),
+      ).timeout(const Duration(seconds: 30));
+
+      if (response.statusCode == 200 || response.statusCode == 204) {
+        if (response.body.isEmpty) return {'respuesta': true};
+        return jsonDecode(response.body) as Map<String, dynamic>;
+      } else {
+        throw ApiException(
+          message: 'Error ${response.statusCode}: ${response.reasonPhrase}',
+          statusCode: response.statusCode,
+        );
+      }
+    } catch (e) {
+      if (e is ApiException) rethrow;
+      throw ApiException(
+        message: 'Error de conexión: ${e.toString()}',
+        statusCode: 0,
+      );
+    }
+  }
+
 
   void dispose() {
     _client.close();

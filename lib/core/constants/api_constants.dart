@@ -21,6 +21,7 @@ class ApiConstants {
   static const String infoRuta = 'api/ruta';
   static const String getNotificacion = 'api/notificacionporempresa';
   static const String turnos = 'api/poblacion'; // api/poblacion/{empresa}/turnos
+  static const String poblacion = 'api/poblacion'; // api/poblacion/{empresa}/{id}
   
   // Login específicos (multi-paso, se mantienen por compatibilidad)
   static const String validarDominio = 'api/validarDominio';

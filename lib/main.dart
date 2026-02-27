@@ -12,9 +12,10 @@ void main() async {
   
   if (session.isLogin) {
     final user = session.getUserData();
+    final company = session.getCompanyData();
     if (user != null) {
       ApiConfig.initialize(
-        empresa: user.idempresa,
+        empresa: company?.clave ?? user.idempresa,
         idUsuario: int.tryParse(user.id) ?? ApiConfig.defaultIdUsuario,
       );
     }
