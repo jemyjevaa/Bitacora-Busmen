@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:bitacora_busmen/core/services/route_service.dart';
 import 'package:bitacora_busmen/core/services/auth_service.dart';
+import 'package:bitacora_busmen/core/services/user_session.dart';
 import 'package:bitacora_busmen/core/constants/api_config.dart';
 import 'package:bitacora_busmen/models/route_monitoring_model.dart';
 import 'package:bitacora_busmen/models/shift_model.dart';
@@ -20,12 +21,16 @@ class _RouteMonitoringScreenState extends State<RouteMonitoringScreen> {
   List<ShiftModel> _availableShifts = [];
   ShiftModel? _selectedShift;
   bool _isLoadingShifts = true;
+  String _companyName = '';
 
   @override
   void initState() {
     super.initState();
-    _routesFuture = _routeService.fetchRoutes(date: _selectedDate);
-    _loadShifts();
+    _companyName = UserSession().getCompanyData()?.nombre ?? '';
+    _routesFuture = _loadData();
+    _loadShifts().then((_) {
+      _refreshData();
+    });
   }
 
   Future<void> _loadShifts() async {
@@ -68,8 +73,41 @@ class _RouteMonitoringScreenState extends State<RouteMonitoringScreen> {
 
   void _refreshData() {
     setState(() {
-      _routesFuture = _routeService.fetchRoutes(date: _selectedDate);
+      _routesFuture = _loadData();
     });
+  }
+
+  Future<List<RouteMonitoringModel>> _loadData() async {
+    // 1. Fetch routes
+    final routes = await _routeService.fetchRoutes(date: _selectedDate);
+
+    // 2. Fetch population if shift is selected
+    if (_selectedShift != null) {
+      final fechaStr = DateFormat('yyyy-MM-dd').format(_selectedDate);
+      final population = await _routeService.fetchPopulationData(
+        ApiConfig.empresa,
+        fechaStr,
+        _selectedShift!.turnoRuta,
+      );
+
+      // 3. Sync data
+      for (var route in routes) {
+        final popData = population.firstWhere(
+          (p) => 
+            (p['clave_ruta']?.toString() == route.claveRuta && p['clave']?.toString() == route.unidad) ||
+            (p['id']?.toString() == route.id.toString() && route.id != 0),
+          orElse: () => <String, dynamic>{},
+        );
+        
+        if (popData.isNotEmpty) {
+          route.id = int.tryParse(popData['id']?.toString() ?? '0') ?? 0;
+          route.poblacion = (popData['poblacion'] ?? popData['nom_col'] ?? '').toString();
+          route.arriboPlanta = (popData['hora'] ?? popData['arribo_planta'] ?? '').toString();
+        }
+      }
+    }
+
+    return routes;
   }
 
   Future<void> _selectDate(BuildContext context) async {
@@ -92,7 +130,7 @@ class _RouteMonitoringScreenState extends State<RouteMonitoringScreen> {
     if (picked != null && picked != _selectedDate) {
       setState(() {
         _selectedDate = picked;
-        _routesFuture = _routeService.fetchRoutes(date: _selectedDate);
+        _refreshData();
       });
     }
   }
@@ -124,9 +162,18 @@ class _RouteMonitoringScreenState extends State<RouteMonitoringScreen> {
     return Scaffold(
       backgroundColor: const Color(0xFFF0F2F5),
       appBar: AppBar(
-        title: const Text(
-          'Mis Rutas',
-          style: TextStyle(fontWeight: FontWeight.bold, color: Colors.white),
+        title: Column(
+          children: [
+            const Text(
+              'Mis Rutas',
+              style: TextStyle(fontWeight: FontWeight.bold, color: Colors.white, fontSize: 18),
+            ),
+            if (_companyName.isNotEmpty)
+              Text(
+                _companyName,
+                style: const TextStyle(fontSize: 12, color: Colors.white70, fontWeight: FontWeight.normal),
+              ),
+          ],
         ),
         centerTitle: true,
         backgroundColor: const Color(0xFF1A237E),
@@ -260,42 +307,46 @@ class _RouteMonitoringScreenState extends State<RouteMonitoringScreen> {
                         ),
                       );
                     }).toList(),
-                    onChanged: (val) {
-                      setState(() {
-                        _selectedShift = val;
-                      });
+                      onChanged: (val) {
+                        setState(() {
+                          _selectedShift = val;
+                          _refreshData();
+                        });
+                      },
+                      isExpanded: true,
+                    ),
+                  ],
+                ),
+              ),
+            const Divider(height: 1, color: Color(0xFFEEEEEE)),
+            Expanded(
+              child: FutureBuilder<List<RouteMonitoringModel>>(
+                future: _routesFuture,
+                builder: (context, snapshot) {
+                  if (snapshot.connectionState == ConnectionState.waiting) {
+                    return const Center(child: CircularProgressIndicator());
+                  } else if (snapshot.hasError) {
+                    return _buildErrorState(snapshot.error.toString());
+                  } else if (!snapshot.hasData || snapshot.data!.isEmpty) {
+                    return _buildEmptyState();
+                  }
+
+                  return ListView.builder(
+                    padding: const EdgeInsets.all(16),
+                    itemCount: snapshot.data!.length,
+                    itemBuilder: (context, index) {
+                      return RouteCard(
+                        route: snapshot.data![index],
+                        selectedDate: _selectedDate,
+                      );
                     },
-                    isExpanded: true,
-                  ),
-                ],
+                  );
+                },
               ),
             ),
-          const Divider(height: 1, color: Color(0xFFEEEEEE)),
-          Expanded(
-            child: FutureBuilder<List<RouteMonitoringModel>>(
-              future: _routesFuture,
-              builder: (context, snapshot) {
-                if (snapshot.connectionState == ConnectionState.waiting) {
-                  return const Center(child: CircularProgressIndicator());
-                } else if (snapshot.hasError) {
-                  return _buildErrorState(snapshot.error.toString());
-                } else if (!snapshot.hasData || snapshot.data!.isEmpty) {
-                  return _buildEmptyState();
-                }
-
-                return ListView.builder(
-                  padding: const EdgeInsets.all(16),
-                  itemCount: snapshot.data!.length,
-                  itemBuilder: (context, index) {
-                    return RouteCard(route: snapshot.data![index]);
-                  },
-                );
-              },
-            ),
-          ),
-        ],
-      ),
-    );
+          ],
+        ),
+      );
   }
 
   Widget _buildEmptyState() {
@@ -347,17 +398,24 @@ class _RouteMonitoringScreenState extends State<RouteMonitoringScreen> {
 
 class RouteCard extends StatefulWidget {
   final RouteMonitoringModel route;
+  final DateTime selectedDate;
 
-  const RouteCard({super.key, required this.route});
+  const RouteCard({
+    super.key,
+    required this.route,
+    required this.selectedDate,
+  });
 
   @override
   State<RouteCard> createState() => _RouteCardState();
 }
 
 class _RouteCardState extends State<RouteCard> {
-  bool _isExpanded = false;
+  bool _hasError = false;
+  bool _isSaving = false;
   final TextEditingController _poblacionController = TextEditingController();
   final TextEditingController _arriboController = TextEditingController();
+  final RouteService _routeService = RouteService();
 
   @override
   void initState() {
@@ -366,28 +424,62 @@ class _RouteCardState extends State<RouteCard> {
     _arriboController.text = widget.route.arriboPlanta;
   }
 
-  Future<void> _selectTime(BuildContext context) async {
-    final TimeOfDay? picked = await showTimePicker(
-      context: context,
-      initialTime: TimeOfDay.now(),
-      builder: (context, child) {
-        return Theme(
-          data: ThemeData.light().copyWith(
-            primaryColor: const Color(0xFF1A237E),
-            colorScheme: const ColorScheme.light(primary: Color(0xFF1A237E)),
-            buttonTheme: const ButtonThemeData(textTheme: ButtonTextTheme.primary),
-          ),
-          child: child!,
-        );
-      },
-    );
-    if (picked != null) {
-      final now = DateTime.now();
-      final dt = DateTime(now.year, now.month, now.day, picked.hour, picked.minute);
-      setState(() {
-        _arriboController.text = DateFormat('HH:mm').format(dt);
-        widget.route.arriboPlanta = _arriboController.text;
-      });
+  @override
+  void didUpdateWidget(covariant RouteCard oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.route.poblacion != widget.route.poblacion) {
+      _poblacionController.text = widget.route.poblacion;
+    }
+    if (oldWidget.route.arriboPlanta != widget.route.arriboPlanta) {
+      _arriboController.text = widget.route.arriboPlanta;
+    }
+  }
+
+  Future<void> _saveData() async {
+    if (_isSaving) return;
+    
+    setState(() {
+      _isSaving = true;
+      _hasError = false;
+    });
+
+    try {
+      final fechaStr = DateFormat('yyyy-MM-dd').format(widget.selectedDate);
+      
+      final data = {
+        'unidad': widget.route.unidad,
+        'clave_ruta': widget.route.claveRuta,
+        'nom_col': _poblacionController.text, // Poblacion
+        'hora': _arriboController.text, // Arrival Time
+        'fecha_asignacion': fechaStr,
+      };
+
+      final success = await _routeService.savePopulationData(
+        ApiConfig.empresa,
+        widget.route.id,
+        data,
+      );
+
+      if (mounted) {
+        if (success) {
+          setState(() {
+            widget.route.poblacion = _poblacionController.text;
+            widget.route.arriboPlanta = _arriboController.text;
+            _hasError = false;
+          });
+        } else {
+          setState(() => _hasError = true);
+        }
+      }
+    } catch (e) {
+      debugPrint('Error saving population: $e');
+      if (mounted) {
+        setState(() => _hasError = true);
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _isSaving = false);
+      }
     }
   }
 
@@ -398,8 +490,12 @@ class _RouteCardState extends State<RouteCard> {
       curve: Curves.easeInOut,
       margin: const EdgeInsets.only(bottom: 12),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: _hasError ? Colors.red[50] : Colors.white,
         borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+          color: _hasError ? Colors.red[300]! : Colors.transparent,
+          width: 1,
+        ),
         boxShadow: [
           BoxShadow(
             color: Colors.black.withValues(alpha: 0.05),
@@ -408,187 +504,118 @@ class _RouteCardState extends State<RouteCard> {
           ),
         ],
       ),
-      child: Material(
-        color: Colors.transparent,
-        child: InkWell(
-          borderRadius: BorderRadius.circular(16),
-          onTap: () {
-            setState(() {
-              _isExpanded = !_isExpanded;
-            });
-          },
-          child: Padding(
-            padding: const EdgeInsets.all(16.0),
-            child: Column(
-              children: [
-                Row(
-                  children: [
-                    Container(
-                      padding: const EdgeInsets.all(10),
-                      decoration: BoxDecoration(
-                        color: const Color(0xFFE8EAF6),
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      child: const Icon(
-                        Icons.directions_bus_filled_rounded,
-                        color: Color(0xFF1A237E),
-                      ),
+      child: Padding(
+        padding: const EdgeInsets.all(12.0),
+        child: Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: _hasError ? Colors.red[100] : const Color(0xFFE8EAF6),
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Icon(
+                _hasError ? Icons.error_outline : Icons.directions_bus_filled_rounded,
+                color: _hasError ? Colors.red[700] : const Color(0xFF1A237E),
+                size: 20,
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              flex: 3,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    widget.route.ruta,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      fontSize: 15,
+                      fontWeight: FontWeight.bold,
+                      color: Color(0xFF1A237E),
                     ),
-                    const SizedBox(width: 16),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            widget.route.ruta,
-                            style: const TextStyle(
-                              fontSize: 17,
-                              fontWeight: FontWeight.bold,
-                              color: Color(0xFF1A237E),
-                            ),
-                          ),
-                          const SizedBox(height: 4),
-                          Text(
-                            'Unidad: ${widget.route.unidad}',
-                            style: TextStyle(
-                              fontSize: 13,
-                              color: Colors.grey[600],
-                              fontWeight: FontWeight.w500,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                    Icon(
-                      _isExpanded ? Icons.expand_less : Icons.expand_more,
-                      color: const Color(0xFF1A237E),
-                    ),
-                  ],
-                ),
-                if (_isExpanded) ...[
-                  const Padding(
-                    padding: EdgeInsets.symmetric(vertical: 16),
-                    child: Divider(height: 1, color: Color(0xFFEEEEEE)),
                   ),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            const Text(
-                              'POBLACIÓN',
-                              style: TextStyle(
-                                fontSize: 11,
-                                fontWeight: FontWeight.bold,
-                                color: Colors.grey,
-                                letterSpacing: 1.1,
-                              ),
-                            ),
-                            const SizedBox(height: 8),
-                            TextField(
-                              controller: _poblacionController,
-                              keyboardType: TextInputType.number,
-                              decoration: InputDecoration(
-                                hintText: 'Num',
-                                hintStyle: const TextStyle(color: Colors.grey, fontSize: 14),
-                                contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                                border: OutlineInputBorder(
-                                  borderRadius: BorderRadius.circular(8),
-                                  borderSide: const BorderSide(color: Color(0xFFE0E0E0)),
-                                ),
-                                enabledBorder: OutlineInputBorder(
-                                  borderRadius: BorderRadius.circular(8),
-                                  borderSide: const BorderSide(color: Color(0xFFE0E0E0)),
-                                ),
-                                focusedBorder: OutlineInputBorder(
-                                  borderRadius: BorderRadius.circular(8),
-                                  borderSide: const BorderSide(color: Color(0xFF1A237E)),
-                                ),
-                              ),
-                              onChanged: (value) => widget.route.poblacion = value,
-                            ),
-                          ],
-                        ),
-                      ),
-                      const SizedBox(width: 16),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            const Text(
-                              'ARRIBO PLANTA',
-                              style: TextStyle(
-                                fontSize: 11,
-                                fontWeight: FontWeight.bold,
-                                color: Colors.grey,
-                                letterSpacing: 1.1,
-                              ),
-                            ),
-                            const SizedBox(height: 8),
-                            InkWell(
-                              onTap: () => _selectTime(context),
-                              child: IgnorePointer(
-                                child: TextField(
-                                  controller: _arriboController,
-                                  decoration: InputDecoration(
-                                    hintText: 'Hora',
-                                    hintStyle: const TextStyle(color: Colors.grey, fontSize: 14),
-                                    suffixIcon: const Icon(Icons.access_time, size: 20),
-                                    contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                                    border: OutlineInputBorder(
-                                      borderRadius: BorderRadius.circular(8),
-                                      borderSide: const BorderSide(color: Color(0xFFE0E0E0)),
-                                    ),
-                                    enabledBorder: OutlineInputBorder(
-                                      borderRadius: BorderRadius.circular(8),
-                                      borderSide: const BorderSide(color: Color(0xFFE0E0E0)),
-                                    ),
-                                    focusedBorder: OutlineInputBorder(
-                                      borderRadius: BorderRadius.circular(8),
-                                      borderSide: const BorderSide(color: Color(0xFF1A237E)),
-                                    ),
-                                  ),
-                                ),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 20),
-                  SizedBox(
-                    width: double.infinity,
-                    child: ElevatedButton(
-                      onPressed: () {
-                        // For now, just show a confirmation
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(
-                            content: Text('Datos guardados localmente'),
-                            backgroundColor: Color(0xFF2E7D32),
-                          ),
-                        );
-                        setState(() => _isExpanded = false);
-                      },
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: const Color(0xFF1A237E),
-                        foregroundColor: Colors.white,
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(8),
-                        ),
-                        padding: const EdgeInsets.symmetric(vertical: 12),
-                      ),
-                      child: const Text(
-                        'GUARDAR',
-                        style: TextStyle(fontWeight: FontWeight.bold),
-                      ),
+                  const SizedBox(height: 2),
+                  Text(
+                    'Unidad: ${widget.route.unidad}',
+                    style: TextStyle(
+                      fontSize: 11,
+                      color: Colors.grey[600],
+                      fontWeight: FontWeight.w500,
                     ),
                   ),
                 ],
-              ],
+              ),
             ),
-          ),
+            const SizedBox(width: 8),
+            if (_isSaving)
+              const SizedBox(
+                width: 20,
+                height: 20,
+                child: CircularProgressIndicator(strokeWidth: 2),
+              )
+            else if (_hasError)
+              IconButton(
+                icon: const Icon(Icons.refresh, color: Colors.red),
+                onPressed: _saveData,
+                constraints: const BoxConstraints(),
+                padding: EdgeInsets.zero,
+                iconSize: 24,
+              ),
+            const SizedBox(width: 8),
+            SizedBox(
+              width: 55,
+              child: TextField(
+                controller: _poblacionController,
+                keyboardType: TextInputType.number,
+                textAlign: TextAlign.center,
+                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+                decoration: InputDecoration(
+                  hintText: 'Pob',
+                  contentPadding: const EdgeInsets.symmetric(vertical: 8),
+                  isDense: true,
+                  filled: true,
+                  fillColor: Colors.grey[100],
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(8),
+                    borderSide: BorderSide.none,
+                  ),
+                  focusedBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(8),
+                    borderSide: const BorderSide(color: Color(0xFF1A237E), width: 1.5),
+                  ),
+                ),
+                onSubmitted: (_) => _saveData(),
+              ),
+            ),
+            const SizedBox(width: 4),
+            SizedBox(
+              width: 55,
+              child: TextField(
+                controller: _arriboController,
+                keyboardType: TextInputType.datetime,
+                textAlign: TextAlign.center,
+                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+                decoration: InputDecoration(
+                  hintText: 'Hora',
+                  contentPadding: const EdgeInsets.symmetric(vertical: 8),
+                  isDense: true,
+                  filled: true,
+                  fillColor: Colors.grey[100],
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(8),
+                    borderSide: BorderSide.none,
+                  ),
+                  focusedBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(8),
+                    borderSide: const BorderSide(color: Color(0xFF1A237E), width: 1.5),
+                  ),
+                ),
+                onSubmitted: (_) => _saveData(),
+              ),
+            ),
+          ],
         ),
       ),
     );

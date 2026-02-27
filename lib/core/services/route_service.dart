@@ -64,6 +64,47 @@ class RouteService {
     }
   }
 
+  /// Obtener los datos de población ya registrados
+  Future<List<Map<String, dynamic>>> fetchPopulationData(String empresa, String fecha, String turno) async {
+    try {
+      final response = await _apiService.get(
+        endpoint: '${ApiConstants.poblacion}/$empresa',
+        queryParams: {
+          'fecha_asignacion': fecha,
+          'turno': turno,
+        },
+      );
+
+      if (response is Map<String, dynamic> && 
+          (response['respuesta'] == true || response['success'] == true)) {
+        return List<Map<String, dynamic>>.from(response['data'] ?? []);
+      }
+      return [];
+    } catch (e) {
+      debugPrint('RouteService Error: fetchPopulationData failed: $e');
+      return [];
+    }
+  }
+
+  /// Guardar/Actualizar datos de población
+  Future<bool> savePopulationData(String empresa, int id, Map<String, dynamic> data) async {
+    try {
+      final endpoint = '${ApiConstants.poblacion}/$empresa/$id';
+      final response = await _apiService.put(
+        endpoint: endpoint,
+        body: data,
+      );
+
+      if (response is Map<String, dynamic>) {
+        return response['respuesta'] == true || response['success'] == true;
+      }
+      return false;
+    } catch (e) {
+      debugPrint('RouteService Error: savePopulationData failed: $e');
+      return false;
+    }
+  }
+
   /// Tracking: Obtener detalles del dispositivo (Traccar API)
   Future<Map<String, dynamic>?> fetchDevice(int idPlataformaGps) async {
     try {

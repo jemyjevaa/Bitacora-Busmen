@@ -16,7 +16,7 @@ class RouteResponse {
 }
 
 class RouteMonitoringModel {
-  final int? _id;
+  int? _id;
   final String? _ruta;
   final String? _unidad;
   final String? _claveRuta;
@@ -25,8 +25,9 @@ class RouteMonitoringModel {
   String poblacion;
   String arriboPlanta;
 
-  // Safe Getters
+  // Safe Getters and Setters
   int get id => _id ?? 0;
+  set id(int value) => _id = value;
   String get ruta => _ruta ?? 'Sin nombre';
   String get unidad => _unidad ?? 'Sin asignar';
   String get claveRuta => _claveRuta ?? '';
@@ -45,7 +46,7 @@ class RouteMonitoringModel {
 
   factory RouteMonitoringModel.fromJson(Map<String, dynamic> json) {
     return RouteMonitoringModel(
-      id: int.tryParse(json['id']?.toString() ?? '0') ?? 0,
+      id: int.tryParse((json['id'] ?? json['id_asignacion'] ?? json['idAsignacion'] ?? '0').toString()) ?? 0,
       ruta: (json['nombre_ruta'] ?? json['ruta'] ?? 'Sin nombre').toString(),
       unidad: (json['unidad'] ?? json['clave_ruta'] ?? json['claveRuta'] ?? 'Sin asignar').toString(),
       claveRuta: (json['clave_ruta'] ?? json['claveRuta'] ?? '').toString(),
