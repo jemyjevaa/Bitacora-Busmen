@@ -4,6 +4,7 @@ import 'package:bitacora_busmen/core/constants/api_constants.dart';
 import 'package:bitacora_busmen/core/constants/api_config.dart';
 import 'package:bitacora_busmen/core/services/api_service.dart';
 import 'package:bitacora_busmen/models/route_monitoring_model.dart';
+import 'package:bitacora_busmen/models/shift_model.dart';
 
 class RouteService {
   final ApiService _apiService;
@@ -12,11 +13,11 @@ class RouteService {
       : _apiService = apiService ?? ApiService();
 
   /// Obtener todas las rutas asignadas al usuario
-  Future<List<RouteMonitoringModel>> fetchRoutes() async {
+  Future<List<RouteMonitoringModel>> fetchRoutes({DateTime? date}) async {
     try {
       final response = await _apiService.post(
         endpoint: ApiConstants.unidadAsignadaRuta,
-        body: ApiConfig.getRouteRequestBody(),
+        body: ApiConfig.getRouteRequestBody(date: date),
         isUrlEncoded: true,
       );
 
@@ -44,6 +45,21 @@ class RouteService {
       return stopRes.data;
     } catch (e) {
       debugPrint('RouteService Warning: fetchRouteStops failed for $claveRuta: $e');
+      return [];
+    }
+  }
+
+  /// Obtener los turnos de una empresa
+  Future<List<ShiftModel>> fetchShifts(String empresa) async {
+    try {
+      final response = await _apiService.get(
+        endpoint: '${ApiConstants.turnos}/$empresa/turnos',
+      );
+
+      final shiftRes = ShiftResponse.fromJson(response);
+      return shiftRes.data;
+    } catch (e) {
+      debugPrint('RouteService Error: fetchShifts failed for $empresa: $e');
       return [];
     }
   }

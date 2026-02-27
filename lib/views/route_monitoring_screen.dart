@@ -2,7 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:bitacora_busmen/core/services/route_service.dart';
 import 'package:bitacora_busmen/core/services/auth_service.dart';
+import 'package:bitacora_busmen/core/constants/api_config.dart';
 import 'package:bitacora_busmen/models/route_monitoring_model.dart';
+import 'package:bitacora_busmen/models/shift_model.dart';
 
 class RouteMonitoringScreen extends StatefulWidget {
   const RouteMonitoringScreen({super.key});
@@ -14,17 +16,107 @@ class RouteMonitoringScreen extends StatefulWidget {
 class _RouteMonitoringScreenState extends State<RouteMonitoringScreen> {
   final RouteService _routeService = RouteService();
   late Future<List<RouteMonitoringModel>> _routesFuture;
+  DateTime _selectedDate = DateTime.now();
+  List<ShiftModel> _availableShifts = [];
+  ShiftModel? _selectedShift;
+  bool _isLoadingShifts = true;
 
   @override
   void initState() {
     super.initState();
-    _routesFuture = _routeService.fetchRoutes();
+    _routesFuture = _routeService.fetchRoutes(date: _selectedDate);
+    _loadShifts();
+  }
+
+  Future<void> _loadShifts() async {
+    setState(() => _isLoadingShifts = true);
+    final shifts = await _routeService.fetchShifts(ApiConfig.empresa);
+    setState(() {
+      _availableShifts = shifts;
+      _isLoadingShifts = false;
+      if (_availableShifts.isNotEmpty) {
+        _selectedShift = _getClosestShift(_availableShifts);
+      }
+    });
+  }
+
+  ShiftModel _getClosestShift(List<ShiftModel> shifts) {
+    final now = DateTime.now();
+    final currentMinutes = now.hour * 60 + now.minute;
+
+    ShiftModel? closest;
+    int minDiff = 1440; // Max minutes in a day
+
+    for (final shift in shifts) {
+      final parts = shift.turnoRuta.split(':');
+      if (parts.length >= 2) {
+        final shiftHour = int.tryParse(parts[0]) ?? 0;
+        final shiftMin = int.tryParse(parts[1]) ?? 0;
+        final shiftMinutes = shiftHour * 60 + shiftMin;
+
+        int diff = (shiftMinutes - currentMinutes).abs();
+        // Handle wraparound if necessary (though usually closest in absolute terms is fine)
+        if (diff < minDiff) {
+          minDiff = diff;
+          closest = shift;
+        }
+      }
+    }
+
+    return closest ?? shifts.first;
   }
 
   void _refreshData() {
     setState(() {
-      _routesFuture = _routeService.fetchRoutes();
+      _routesFuture = _routeService.fetchRoutes(date: _selectedDate);
     });
+  }
+
+  Future<void> _selectDate(BuildContext context) async {
+    final DateTime? picked = await showDatePicker(
+      context: context,
+      initialDate: _selectedDate,
+      firstDate: DateTime(2024),
+      lastDate: DateTime.now(),
+      builder: (context, child) {
+        return Theme(
+          data: ThemeData.light().copyWith(
+            primaryColor: const Color(0xFF1A237E),
+            colorScheme: const ColorScheme.light(primary: Color(0xFF1A237E)),
+            buttonTheme: const ButtonThemeData(textTheme: ButtonTextTheme.primary),
+          ),
+          child: child!,
+        );
+      },
+    );
+    if (picked != null && picked != _selectedDate) {
+      setState(() {
+        _selectedDate = picked;
+        _routesFuture = _routeService.fetchRoutes(date: _selectedDate);
+      });
+    }
+  }
+
+  String _formatDateInSpanish(DateTime date) {
+    final days = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'];
+    final months = [
+      'enero',
+      'febrero',
+      'marzo',
+      'abril',
+      'mayo',
+      'junio',
+      'julio',
+      'agosto',
+      'septiembre',
+      'octubre',
+      'noviembre',
+      'diciembre'
+    ];
+    // weekday: 1 (Lunes) to 7 (Domingo)
+    final dayName = days[date.weekday % 7];
+    final monthName = months[date.month - 1];
+    return '$dayName, ${date.day} de $monthName de ${date.year}';
   }
 
   @override
@@ -55,25 +147,153 @@ class _RouteMonitoringScreenState extends State<RouteMonitoringScreen> {
           ),
         ],
       ),
-      body: FutureBuilder<List<RouteMonitoringModel>>(
-        future: _routesFuture,
-        builder: (context, snapshot) {
-          if (snapshot.connectionState == ConnectionState.waiting) {
-            return const Center(child: CircularProgressIndicator());
-          } else if (snapshot.hasError) {
-            return _buildErrorState(snapshot.error.toString());
-          } else if (!snapshot.hasData || snapshot.data!.isEmpty) {
-            return _buildEmptyState();
-          }
+      body: Column(
+        children: [
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(20),
+            color: Colors.white,
+            child: Column(
+              children: [
+                Text(
+                  'Fecha seleccionada',
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: Colors.grey[600],
+                    fontWeight: FontWeight.w500,
+                    letterSpacing: 0.5,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  _formatDateInSpanish(_selectedDate),
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(
+                    fontSize: 20,
+                    fontWeight: FontWeight.bold,
+                    color: Color(0xFF1A237E),
+                  ),
+                ),
+                const SizedBox(height: 16),
+                ElevatedButton.icon(
+                  onPressed: () => _selectDate(context),
+                  icon: const Icon(Icons.edit_calendar, size: 18),
+                  label: const Text('CAMBIAR FECHA'),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFFE8EAF6),
+                    foregroundColor: const Color(0xFF1A237E),
+                    elevation: 0,
+                    padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          if (_isLoadingShifts)
+            const Padding(
+              padding: EdgeInsets.symmetric(vertical: 10),
+              child: LinearProgressIndicator(minHeight: 2),
+            )
+          else if (_availableShifts.isNotEmpty)
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+              color: Colors.white,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    'Turno / Horario',
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: Colors.grey,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  DropdownButtonFormField<ShiftModel>(
+                    value: _selectedShift,
+                    decoration: InputDecoration(
+                      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(12),
+                        borderSide: BorderSide(color: Colors.grey[300]!),
+                      ),
+                      enabledBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(12),
+                        borderSide: BorderSide(color: Colors.grey[300]!),
+                      ),
+                      prefixIcon: Icon(
+                        _selectedShift?.isEntrada == true ? Icons.login : Icons.logout,
+                        color: _selectedShift?.isEntrada == true ? Colors.green : Colors.orange,
+                        size: 20,
+                      ),
+                    ),
+                    items: _availableShifts.map((shift) {
+                      return DropdownMenuItem(
+                        value: shift,
+                        child: Row(
+                          children: [
+                            Text(
+                              shift.turnoRuta.substring(0, 5),
+                              style: const TextStyle(fontWeight: FontWeight.bold),
+                            ),
+                            const SizedBox(width: 8),
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                              decoration: BoxDecoration(
+                                color: shift.isEntrada ? Colors.green.withValues(alpha: 0.1) : Colors.orange.withValues(alpha: 0.1),
+                                borderRadius: BorderRadius.circular(4),
+                              ),
+                              child: Text(
+                                shift.direccionRuta,
+                                style: TextStyle(
+                                  fontSize: 10,
+                                  fontWeight: FontWeight.bold,
+                                  color: shift.isEntrada ? Colors.green[700] : Colors.orange[700],
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      );
+                    }).toList(),
+                    onChanged: (val) {
+                      setState(() {
+                        _selectedShift = val;
+                      });
+                    },
+                    isExpanded: true,
+                  ),
+                ],
+              ),
+            ),
+          const Divider(height: 1, color: Color(0xFFEEEEEE)),
+          Expanded(
+            child: FutureBuilder<List<RouteMonitoringModel>>(
+              future: _routesFuture,
+              builder: (context, snapshot) {
+                if (snapshot.connectionState == ConnectionState.waiting) {
+                  return const Center(child: CircularProgressIndicator());
+                } else if (snapshot.hasError) {
+                  return _buildErrorState(snapshot.error.toString());
+                } else if (!snapshot.hasData || snapshot.data!.isEmpty) {
+                  return _buildEmptyState();
+                }
 
-          return ListView.builder(
-            padding: const EdgeInsets.all(16),
-            itemCount: snapshot.data!.length,
-            itemBuilder: (context, index) {
-              return RouteCard(route: snapshot.data![index]);
-            },
-          );
-        },
+                return ListView.builder(
+                  padding: const EdgeInsets.all(16),
+                  itemCount: snapshot.data!.length,
+                  itemBuilder: (context, index) {
+                    return RouteCard(route: snapshot.data![index]);
+                  },
+                );
+              },
+            ),
+          ),
+        ],
       ),
     );
   }

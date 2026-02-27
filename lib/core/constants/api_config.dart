@@ -38,12 +38,21 @@ class ApiConfig {
   }
   
   /// Get the request body for fetching routes
-  static Map<String, dynamic> getRouteRequestBody() {
-    return {
+  static Map<String, dynamic> getRouteRequestBody({DateTime? date}) {
+    final Map<String, dynamic> body = {
       'empresa': empresa,
       'idUsuario': idUsuario,
       'tipo_ruta': tipoRuta,
       'tipo_usuario': tipoUsuario,
     };
+
+    if (date != null) {
+      final year = date.year.toString();
+      final month = date.month.toString().padLeft(2, '0');
+      final day = date.day.toString().padLeft(2, '0');
+      body['fecha'] = '$year-$month-$day';
+    }
+
+    return body;
   }
 }
