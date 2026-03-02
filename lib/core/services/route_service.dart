@@ -21,6 +21,9 @@ class RouteService {
         isUrlEncoded: true,
       );
 
+      if (response != null && response['data'] != null && (response['data'] as List).isNotEmpty) {
+        debugPrint('🔵 fetchRoutes first item: ${response['data'][0]}');
+      }
       final routeRes = RouteResponse.fromJson(response);
       return routeRes.data;
     } catch (e) {
@@ -67,6 +70,7 @@ class RouteService {
   /// Obtener los datos de población ya registrados
   Future<List<Map<String, dynamic>>> fetchPopulationData(String empresa, String fecha, String turno) async {
     try {
+      debugPrint('🔵 fetchPopulationData: empresa=$empresa fecha=$fecha turno=$turno');
       final response = await _apiService.get(
         endpoint: '${ApiConstants.poblacion}/$empresa',
         queryParams: {
@@ -75,10 +79,15 @@ class RouteService {
         },
       );
 
+      debugPrint(' fetchPopulationData response: $response');
+
       if (response is Map<String, dynamic> && 
           (response['respuesta'] == true || response['success'] == true)) {
-        return List<Map<String, dynamic>>.from(response['data'] ?? []);
+        final list = List<Map<String, dynamic>>.from(response['data'] ?? []);
+        debugPrint(' fetchPopulationData: ${list.length} registros encontrados');
+        return list;
       }
+      debugPrint(' fetchPopulationData: respuesta sin success/data');
       return [];
     } catch (e) {
       debugPrint('RouteService Error: fetchPopulationData failed: $e');
@@ -86,22 +95,53 @@ class RouteService {
     }
   }
 
-  /// Guardar/Actualizar datos de población
-  Future<bool> savePopulationData(String empresa, int id, Map<String, dynamic> data) async {
+  /// Guardar/Actualizar datos de población. Retorna el id del registro (>0) si éxito, 0 si falló.
+  Future<int> savePopulationData(String empresa, int populationId, Map<String, dynamic> data) async {
     try {
-      final endpoint = '${ApiConstants.poblacion}/$empresa/$id';
-      final response = await _apiService.put(
-        endpoint: endpoint,
-        body: data,
-      );
+      final Map<String, dynamic> response;
 
-      if (response is Map<String, dynamic>) {
-        return response['respuesta'] == true || response['success'] == true;
+      if (populationId == 0) {
+        // Sin registro previo → POST para crear
+        debugPrint(' savePopulationData: POST api/poblacion/$empresa data=$data');
+        response = await _apiService.post(
+          endpoint: '${ApiConstants.poblacion}/$empresa',
+          body: data,
+        );
+      } else {
+        // Registro existente → PUT para actualizar
+        final endpoint = '${ApiConstants.poblacion}/$empresa/$populationId';
+        debugPrint(' savePopulationData: PUT $endpoint data=$data');
+        response = await _apiService.put(
+          endpoint: endpoint,
+          body: data,
+        );
       }
-      return false;
+
+      debugPrint('savePopulationData response: $response');
+
+      // Extraer ID de manera robusta del 'id' o de 'data.id'
+      int returnedId = 0;
+      if (response['data'] != null && response['data'] is Map) {
+        returnedId = int.tryParse(response['data']['id']?.toString() ?? '0') ?? 0;
+      }
+      if (returnedId == 0) {
+        returnedId = int.tryParse(response['id']?.toString() ?? '0') ?? 0;
+      }
+
+      final success = response['respuesta'] == true || 
+                      response['success'] == true || 
+                      returnedId > 0 ||
+                      response['message']?.toString().contains('correctamente') == true;
+      
+      if (!success) return 0;
+
+      // Si es un PUT exitoso y no regresó ID, mantenemos el que teníamos
+      final finalId = returnedId > 0 ? returnedId : (populationId > 0 ? populationId : 0);
+      debugPrint('🔵 savePopulationData Result: finalId=$finalId');
+      return finalId;
     } catch (e) {
       debugPrint('RouteService Error: savePopulationData failed: $e');
-      return false;
+      return 0;
     }
   }
 

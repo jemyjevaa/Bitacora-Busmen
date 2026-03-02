@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import '../constants/api_constants.dart';
 
@@ -43,8 +44,9 @@ class ApiService {
       if (response.statusCode == 200 || response.statusCode == 201) {
         return jsonDecode(response.body) as Map<String, dynamic>;
       } else {
+        debugPrint('❌ POST ${response.statusCode} body: ${response.body}');
         throw ApiException(
-          message: 'Error ${response.statusCode}: ${response.reasonPhrase}',
+          message: 'Error ${response.statusCode}: ${response.reasonPhrase} | ${response.body}',
           statusCode: response.statusCode,
         );
       }

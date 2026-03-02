@@ -80,6 +80,10 @@ class _RouteMonitoringScreenState extends State<RouteMonitoringScreen> {
   Future<List<RouteMonitoringModel>> _loadData() async {
     // 1. Fetch routes
     final routes = await _routeService.fetchRoutes(date: _selectedDate);
+    debugPrint('🔵 _loadData: ${routes.length} rutas obtenidas');
+    for (var r in routes) {
+      debugPrint('  ruta id=${r.id} clave=${r.claveRuta} unidad=${r.unidad} horario=${r.horario}');
+    }
 
     // 2. Fetch population if shift is selected
     if (_selectedShift != null) {
@@ -90,19 +94,44 @@ class _RouteMonitoringScreenState extends State<RouteMonitoringScreen> {
         _selectedShift!.turnoRuta,
       );
 
+      debugPrint('🔵 _loadData: ${population.length} registros población');
+      for (var p in population) {
+        debugPrint('  pop id=${p['id']} clave=${p['clave']} clave_ruta=${p['clave_ruta']}');
+      }
+
       // 3. Sync data
       for (var route in routes) {
-        final popData = population.firstWhere(
-          (p) => 
-            (p['clave_ruta']?.toString() == route.claveRuta && p['clave']?.toString() == route.unidad) ||
-            (p['id']?.toString() == route.id.toString() && route.id != 0),
-          orElse: () => <String, dynamic>{},
-        );
+        // Buscamos todas las coincidencias por clave_ruta o por unidad (clave)
+        final matches = population.where(
+          (p) {
+            final pClaveRuta = (p['clave_ruta'] ?? p['claveRuta'] ?? '').toString().trim().toUpperCase();
+            final rClaveRuta = route.claveRuta.trim().toUpperCase();
+            
+            final pClave = (p['clave'] ?? p['unidad'] ?? '').toString().trim().toUpperCase();
+            final rUnidad = route.unidad.trim().toUpperCase();
+
+            return (pClaveRuta == rClaveRuta && rClaveRuta.isNotEmpty) || 
+                   (pClave == rUnidad && rUnidad.isNotEmpty);
+          }
+        ).toList();
         
-        if (popData.isNotEmpty) {
-          route.id = int.tryParse(popData['id']?.toString() ?? '0') ?? 0;
-          route.poblacion = (popData['poblacion'] ?? popData['nom_col'] ?? '').toString();
-          route.arriboPlanta = (popData['hora'] ?? popData['arribo_planta'] ?? '').toString();
+        if (matches.isNotEmpty) {
+          // Si hay varias, intentamos priorizar la que ya tiene datos
+          final popData = matches.firstWhere(
+            (p) => (p['poblacion'] ?? p['nom_col'] ?? p['pasajeros']) != null,
+            orElse: () => matches.first,
+          );
+
+          debugPrint('✅ Match: ruta ${route.claveRuta}/${route.unidad} → pop id=${popData['id']}');
+          route.populationId = int.tryParse(popData['id']?.toString() ?? '0') ?? 0;
+          
+          // Extraer el valor de población de cualquier campo posible
+          final val = (popData['poblacion'] ?? popData['nom_col'] ?? popData['pasajeros'] ?? '').toString();
+          route.poblacion = val == 'null' ? '' : val;
+        } else {
+          debugPrint('❌ Sin match: ruta ${route.claveRuta}/${route.unidad} (población=0)');
+          route.populationId = 0;
+          route.poblacion = '';
         }
       }
     }
@@ -331,13 +360,38 @@ class _RouteMonitoringScreenState extends State<RouteMonitoringScreen> {
                     return _buildEmptyState();
                   }
 
+                  final allRoutes = snapshot.data!;
+                  final filteredRoutes = allRoutes.where((route) {
+                    final selectedShift = _selectedShift?.turnoRuta ?? '';
+                    // Si ya tiene match (populationId > 0), se queda.
+                    if (route.populationId > 0) return true;
+                    // Si el horario coincide exactamente con el seleccionado, se queda.
+                    if (route.horario == selectedShift && selectedShift.isNotEmpty) return true;
+                    // Si no hay filtro, mostrar todas (opcional, pero mejor ser estricto si hay turno)
+                    return _selectedShift == null;
+                  }).toList();
+
+                  if (filteredRoutes.isEmpty) {
+                    return const Center(
+                      child: Padding(
+                        padding: EdgeInsets.all(32.0),
+                        child: Text(
+                          'No hay rutas asignadas para este horario.',
+                          textAlign: TextAlign.center,
+                          style: TextStyle(color: Colors.grey),
+                        ),
+                      ),
+                    );
+                  }
+
                   return ListView.builder(
                     padding: const EdgeInsets.all(16),
-                    itemCount: snapshot.data!.length,
+                    itemCount: filteredRoutes.length,
                     itemBuilder: (context, index) {
                       return RouteCard(
-                        route: snapshot.data![index],
+                        route: filteredRoutes[index],
                         selectedDate: _selectedDate,
+                        selectedTurno: _selectedShift?.turnoRuta ?? '',
                       );
                     },
                   );
@@ -399,11 +453,13 @@ class _RouteMonitoringScreenState extends State<RouteMonitoringScreen> {
 class RouteCard extends StatefulWidget {
   final RouteMonitoringModel route;
   final DateTime selectedDate;
+  final String selectedTurno;
 
   const RouteCard({
     super.key,
     required this.route,
     required this.selectedDate,
+    required this.selectedTurno,
   });
 
   @override
@@ -414,14 +470,12 @@ class _RouteCardState extends State<RouteCard> {
   bool _hasError = false;
   bool _isSaving = false;
   final TextEditingController _poblacionController = TextEditingController();
-  final TextEditingController _arriboController = TextEditingController();
   final RouteService _routeService = RouteService();
 
   @override
   void initState() {
     super.initState();
     _poblacionController.text = widget.route.poblacion;
-    _arriboController.text = widget.route.arriboPlanta;
   }
 
   @override
@@ -429,9 +483,6 @@ class _RouteCardState extends State<RouteCard> {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.route.poblacion != widget.route.poblacion) {
       _poblacionController.text = widget.route.poblacion;
-    }
-    if (oldWidget.route.arriboPlanta != widget.route.arriboPlanta) {
-      _arriboController.text = widget.route.arriboPlanta;
     }
   }
 
@@ -447,24 +498,28 @@ class _RouteCardState extends State<RouteCard> {
       final fechaStr = DateFormat('yyyy-MM-dd').format(widget.selectedDate);
       
       final data = {
+        'clave': widget.route.unidad,       // requerido por el API para POST
         'unidad': widget.route.unidad,
         'clave_ruta': widget.route.claveRuta,
-        'nom_col': _poblacionController.text, // Poblacion
-        'hora': _arriboController.text, // Arrival Time
+        'nom_col': _poblacionController.text,
+        'poblacion': _poblacionController.text, // redundancia para asegurar persistencia
         'fecha_asignacion': fechaStr,
+        'turno': widget.selectedTurno,
       };
 
-      final success = await _routeService.savePopulationData(
+      debugPrint('🔵 RouteCard._saveData: popId=${widget.route.populationId} data=$data');
+
+      final savedId = await _routeService.savePopulationData(
         ApiConfig.empresa,
-        widget.route.id,
+        widget.route.populationId,
         data,
       );
 
       if (mounted) {
-        if (success) {
+        if (savedId > 0) {
           setState(() {
+            widget.route.populationId = savedId; // Actualizar para futuros guardados (PUT)
             widget.route.poblacion = _poblacionController.text;
-            widget.route.arriboPlanta = _arriboController.text;
             _hasError = false;
           });
         } else {
@@ -589,32 +644,6 @@ class _RouteCardState extends State<RouteCard> {
                 onSubmitted: (_) => _saveData(),
               ),
             ),
-            const SizedBox(width: 4),
-            SizedBox(
-              width: 55,
-              child: TextField(
-                controller: _arriboController,
-                keyboardType: TextInputType.datetime,
-                textAlign: TextAlign.center,
-                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
-                decoration: InputDecoration(
-                  hintText: 'Hora',
-                  contentPadding: const EdgeInsets.symmetric(vertical: 8),
-                  isDense: true,
-                  filled: true,
-                  fillColor: Colors.grey[100],
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(8),
-                    borderSide: BorderSide.none,
-                  ),
-                  focusedBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(8),
-                    borderSide: const BorderSide(color: Color(0xFF1A237E), width: 1.5),
-                  ),
-                ),
-                onSubmitted: (_) => _saveData(),
-              ),
-            ),
           ],
         ),
       ),
@@ -624,7 +653,6 @@ class _RouteCardState extends State<RouteCard> {
   @override
   void dispose() {
     _poblacionController.dispose();
-    _arriboController.dispose();
     super.dispose();
   }
 }
