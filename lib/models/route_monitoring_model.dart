@@ -21,9 +21,12 @@ class RouteMonitoringModel {
   final String? _unidad;
   final String? _claveRuta;
   
+  // ID del registro en la tabla de población (0 si aún no existe)
+  int populationId;
+  
   // Dynamic fields for the form
   String poblacion;
-  String arriboPlanta;
+  String horario;
 
   // Safe Getters and Setters
   int get id => _id ?? 0;
@@ -37,8 +40,9 @@ class RouteMonitoringModel {
     String? ruta,
     String? unidad,
     String? claveRuta,
+    this.populationId = 0,
     this.poblacion = '',
-    this.arriboPlanta = '',
+    this.horario = '',
   }) : _id = id,
        _ruta = ruta,
        _unidad = unidad,
@@ -50,6 +54,7 @@ class RouteMonitoringModel {
       ruta: (json['nombre_ruta'] ?? json['ruta'] ?? 'Sin nombre').toString(),
       unidad: (json['unidad'] ?? json['clave_ruta'] ?? json['claveRuta'] ?? 'Sin asignar').toString(),
       claveRuta: (json['clave_ruta'] ?? json['claveRuta'] ?? '').toString(),
+      horario: (json['horario'] ?? json['turno'] ?? json['hora'] ?? json['turno_ruta'] ?? '').toString(),
     );
   }
 }
