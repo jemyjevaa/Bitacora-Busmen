@@ -20,11 +20,11 @@ class AuthService {
       debugPrint('AuthService: Inciando login para $email...');
       
       final responseBody = await _apiService.post(
-        endpoint: ApiConstants.validaUsuarioEmpresa,
+        endpoint: ApiConstants.urlvalidaUsuarioEmpresa,
         baseUrl: ApiConstants.baseUrl,
         body: {
-          'correo': email,
-          'contraseña': password,
+          'user': email,
+          'password': password,
         },
         isUrlEncoded: true,
       );
