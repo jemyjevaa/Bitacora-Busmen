@@ -9,6 +9,7 @@ class ApiConstants {
   
   // Endpoints
   static const String validaUsuarioEmpresa = 'api/validaUsuarioEmpresa';
+  static const String urlvalidaUsuarioEmpresa = "api/session/app";
   static const String sesionGps = 'api/session';
   static const String datosServers = 'api/datosservidores';
   static const String unidadAsignadaRuta = 'api/unidadAsignadaRuta';
